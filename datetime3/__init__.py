@@ -8,6 +8,8 @@ import time as _time
 import math as _math
 import sys
 
+__metaclass__ = type
+
 def _cmp(x, y):
     return 0 if x == y else 1 if x > y else -1
 
@@ -465,6 +467,9 @@ def _divide_and_round(a, b):
 
     return q
 
+def _unexpected_kwarg(kw):
+    arg = next(iter(kw))
+    raise TypeError('got an unexpected keyword argument {:r}'.format(arg))
 
 class timedelta:
     """Represent the difference between two datetime objects.
@@ -549,7 +554,7 @@ class timedelta:
         # secondsfrac isn't referenced again
 
         if isinstance(microseconds, float):
-            microseconds = round(microseconds + usdouble)
+            microseconds = int(round(microseconds + usdouble))
             seconds, microseconds = divmod(microseconds, 1000000)
             days, seconds = divmod(seconds, 24*3600)
             d += days
@@ -560,7 +565,7 @@ class timedelta:
             days, seconds = divmod(seconds, 24*3600)
             d += days
             s += seconds
-            microseconds = round(microseconds + usdouble)
+            microseconds = int(round(microseconds + usdouble))
         assert isinstance(s, int)
         assert isinstance(microseconds, int)
         assert abs(s) <= 3 * 24 * 3600
@@ -1237,7 +1242,7 @@ class time:
     """
     __slots__ = '_hour', '_minute', '_second', '_microsecond', '_tzinfo', '_hashcode', '_fold'
 
-    def __new__(cls, hour=0, minute=0, second=0, microsecond=0, tzinfo=None, *, fold=0):
+    def __new__(cls, hour=0, minute=0, second=0, microsecond=0, tzinfo=None, **kw):
         """Constructor.
 
         Arguments:
@@ -1263,6 +1268,9 @@ class time:
             self.__setstate(hour, minute or None)
             self._hashcode = -1
             return self
+        fold = kw.pop('fold', 0)
+        if kw:
+            _unexpected_kwarg(fold)
         hour, minute, second, microsecond, fold = _check_time_fields(
             hour, minute, second, microsecond, fold)
         _check_tzinfo_arg(tzinfo)
@@ -1504,8 +1512,11 @@ class time:
         return offset
 
     def replace(self, hour=None, minute=None, second=None, microsecond=None,
-                tzinfo=True, *, fold=None):
+                tzinfo=True, **kw):
         """Return a new time with new values for the specified fields."""
+        fold = kw.pop('fold', None)
+        if kw:
+            _unexpected_kwarg(fold)
         if hour is None:
             hour = self.hour
         if minute is None:
@@ -1569,7 +1580,7 @@ class datetime(date):
     __slots__ = date.__slots__ + time.__slots__
 
     def __new__(cls, year, month=None, day=None, hour=0, minute=0, second=0,
-                microsecond=0, tzinfo=None, *, fold=0):
+                microsecond=0, tzinfo=None, **kw):
         if (isinstance(year, (bytes, str)) and len(year) == 10 and
             1 <= ord(year[2:3])&0x7F <= 12):
             # Pickle support
@@ -1586,6 +1597,9 @@ class datetime(date):
             self.__setstate(year, month)
             self._hashcode = -1
             return self
+        fold = kw.pop('fold', 0)
+        if kw:
+            _unexpected_kwarg(fold)
         year, month, day = _check_date_fields(year, month, day)
         hour, minute, second, microsecond, fold = _check_time_fields(
             hour, minute, second, microsecond, fold)
@@ -1640,7 +1654,7 @@ class datetime(date):
         A timezone info object may be passed in as well.
         """
         frac, t = _math.modf(t)
-        us = round(frac * 1e6)
+        us = int(round(frac * 1e6))
         if us >= 1000000:
             t += 1
             us -= 1000000
@@ -1824,8 +1838,11 @@ class datetime(date):
 
     def replace(self, year=None, month=None, day=None, hour=None,
                 minute=None, second=None, microsecond=None, tzinfo=True,
-                *, fold=None):
+                **kw):
         """Return a new datetime with new values for the specified fields."""
+        fold = kw.pop('fold', True)
+        if kw:
+            _unexpected_kwarg(fold)
         if year is None:
             year = self.year
         if month is None:
