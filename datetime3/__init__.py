@@ -882,7 +882,8 @@ class date:
             assert len(date_string) == 10
             return cls(*_parse_isoformat_date(date_string))
         except Exception:
-            raise ValueError(f'Invalid isoformat string: {date_string!r}')
+            raise ValueError('Invalid isoformat string: {date_string!r}'
+                             .format(date_string=date_string))
 
     @classmethod
     def fromisocalendar(cls, year, week, day):
@@ -891,7 +892,8 @@ class date:
         This is the inverse of the date.isocalendar() function"""
         # Year is bounded this way because 9999-12-31 is (9999, 52, 5)
         if not MINYEAR <= year <= MAXYEAR:
-            raise ValueError(f"Year is out of range: {year}")
+            raise ValueError("Year is out of range: {year}"
+                             .format(year=year))
 
         if not 0 < week < 53:
             out_of_range = True
@@ -905,10 +907,12 @@ class date:
                     out_of_range = False
 
             if out_of_range:
-                raise ValueError(f"Invalid week: {week}")
+                raise ValueError("Invalid week: {week}"
+                                 .format(year=year))
 
         if not 0 < day < 8:
-            raise ValueError(f"Invalid weekday: {day} (range is [1, 7])")
+            raise ValueError("Invalid weekday: {day} (range is [1, 7])"
+                             .format(day=day))
 
         # Now compute the offset from (Y, 1, 1) in days:
         day_offset = (week - 1) * 7 + (day - 1)
@@ -1438,7 +1442,8 @@ class time:
         try:
             return cls(*_parse_isoformat_time(time_string))
         except Exception:
-            raise ValueError(f'Invalid isoformat string: {time_string!r}')
+            raise ValueError('Invalid isoformat string: {time_string!r}'
+                             .format(time_string=time_string))
 
 
     def strftime(self, fmt):
@@ -1725,13 +1730,15 @@ class datetime(date):
         try:
             date_components = _parse_isoformat_date(dstr)
         except ValueError:
-            raise ValueError(f'Invalid isoformat string: {date_string!r}')
+            raise ValueError('Invalid isoformat string: {date_string!r}'
+                             .format(date_string=date_string))
 
         if tstr:
             try:
                 time_components = _parse_isoformat_time(tstr)
             except ValueError:
-                raise ValueError(f'Invalid isoformat string: {date_string!r}')
+                raise ValueError('Invalid isoformat string: {date_string!r}'
+                                 .format(date_string=date_string))
         else:
             time_components = [0, 0, 0, 0, None]
 
@@ -2285,12 +2292,17 @@ class timezone(tzinfo):
         minutes, rest = divmod(rest, timedelta(minutes=1))
         seconds = rest.seconds
         microseconds = rest.microseconds
+        fmtargs = dict(hours=hours, minutes=minutes, seconds=seconds,
+                       microseconds=microseconds, fold=fold)
         if microseconds:
-            return (f'UTC{sign}{hours:02d}:{minutes:02d}:{seconds:02d}'
-                    f'.{microseconds:06d}')
+            return ('UTC{sign}{hours:02d}:{minutes:02d}:{seconds:02d}'
+                    '.{microseconds:06d}'
+                    ).format(**fmtargs)
         if seconds:
-            return f'UTC{sign}{hours:02d}:{minutes:02d}:{seconds:02d}'
-        return f'UTC{sign}{hours:02d}:{minutes:02d}'
+            return ('UTC{sign}{hours:02d}:{minutes:02d}:{seconds:02d}'
+                    .format(**fmtargs))
+        return ('UTC{sign}{hours:02d}:{minutes:02d}'
+                .format(**fmtargs))
 
 timezone.utc = timezone._create(timedelta(0))
 # bpo-37642: These attributes are rounded to the nearest minute for backwards
@@ -2497,6 +2509,7 @@ _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 # pretty bizarre, and a tzinfo subclass can override fromutc() if it is.
 
 try:
+    raise ImportError   # do not use extension module
     from _datetime import *
 except ImportError:
     pass
