@@ -439,8 +439,14 @@ def _check_time_fields(hour, minute, second, microsecond, fold):
     return hour, minute, second, microsecond, fold
 
 def _check_tzinfo_arg(tz):
+    if isinstance(tz, str):
+        if tz not in timezone._bystr:
+             dummy = _parse_isoformat_time('00:00:00' + tz)
+        tz = timezone._bystr[tz]
+
     if tz is not None and not isinstance(tz, tzinfo):
         raise TypeError("tzinfo argument must be None or of a tzinfo subclass")
+    return tz
 
 def _cmperror(x, y):
     raise TypeError("can't compare '%s' to '%s'" % (
@@ -781,11 +787,6 @@ class timedelta:
     def __reduce__(self):
         return (self.__class__, self._getstate())
 
-timedelta.min = timedelta(-999999999)
-timedelta.max = timedelta(days=999999999, hours=23, minutes=59, seconds=59,
-                          microseconds=999999)
-timedelta.resolution = timedelta(microseconds=1)
-
 class date:
     """Concrete date type.
 
@@ -851,10 +852,17 @@ class date:
     # Additional constructors
 
     @classmethod
-    def fromtimestamp(cls, t):
-        "Construct a date from a POSIX timestamp (like time.time())."
-        y, m, d, hh, mm, ss, weekday, jday, dst = _time.localtime(t)
-        return cls(y, m, d)
+    def fromtimestamp(cls, t, tz=None):
+        """Construct aware local datetime from a POSIX timestamp (like time.time()).
+
+        If tz not supplied, defaults to static offset in local timezone.
+        """
+        tz = _check_tzinfo_arg(tz)
+        if tz is None:
+            isdst = _time.localtime(t).tm_isdst
+            ofs = _time.altzone if isdst else _time.timezone
+            tz = timezone(timedelta(seconds=-ofs))
+        return cls._fromtimestamp(t, True, tz)
 
     @classmethod
     def today(cls):
@@ -1137,10 +1145,6 @@ class date:
 
 _date_class = date  # so functions w/ args named "date" can get at the class
 
-date.min = date(1, 1, 1)
-date.max = date(9999, 12, 31)
-date.resolution = timedelta(days=1)
-
 
 class tzinfo:
     """Abstract base class for time zone info classes.
@@ -1265,7 +1269,7 @@ class time:
             return self
         hour, minute, second, microsecond, fold = _check_time_fields(
             hour, minute, second, microsecond, fold)
-        _check_tzinfo_arg(tzinfo)
+        tzinfo = _check_tzinfo_arg(tzinfo)
         self = object.__new__(cls)
         self._hour = hour
         self._minute = minute
@@ -1409,7 +1413,10 @@ class time:
                                 self._hour, self._minute, s)
         if self._tzinfo is not None:
             assert s[-1:] == ")"
-            s = s[:-1] + ", tzinfo=%r" % self._tzinfo + ")"
+            tz = self._tzinfo
+            if type(tz) is timezone and tz._name is None:
+                tz = _format_offset(tz._offset)
+            s = s[:-1] + ", tzinfo=%r" % tz + ")"
         if self._fold:
             assert s[-1:] == ")"
             s = s[:-1] + ", fold=1)"
@@ -1556,9 +1563,6 @@ class time:
 
 _time_class = time  # so functions w/ args named "time" can get at the class
 
-time.min = time(0, 0, 0)
-time.max = time(23, 59, 59, 999999)
-time.resolution = timedelta(microseconds=1)
 
 class datetime(date):
     """datetime(year, month, day[, hour[, minute[, second[, microsecond[,tzinfo]]]]])
@@ -1567,9 +1571,10 @@ class datetime(date):
     instance of a tzinfo subclass. The remaining arguments may be ints.
     """
     __slots__ = date.__slots__ + time.__slots__
+    _allow_naive = True
 
     def __new__(cls, year, month=None, day=None, hour=0, minute=0, second=0,
-                microsecond=0, tzinfo=None, *, fold=0):
+                microsecond=0, tzinfo='+00:00', *, fold=0):
         if (isinstance(year, (bytes, str)) and len(year) == 10 and
             1 <= ord(year[2:3])&0x7F <= 12):
             # Pickle support
@@ -1589,7 +1594,9 @@ class datetime(date):
         year, month, day = _check_date_fields(year, month, day)
         hour, minute, second, microsecond, fold = _check_time_fields(
             hour, minute, second, microsecond, fold)
-        _check_tzinfo_arg(tzinfo)
+        tzinfo = _check_tzinfo_arg(tzinfo)
+        if not cls._allow_naive and tzinfo is None:
+            raise ValueError("timezone-aware datetime requires tzinfo")
         self = object.__new__(cls)
         self._year = year
         self._month = month
@@ -1678,19 +1685,9 @@ class datetime(date):
         return result
 
     @classmethod
-    def fromtimestamp(cls, t, tz=None):
-        """Construct a datetime from a POSIX timestamp (like time.time()).
-
-        A timezone info object may be passed in as well.
-        """
-        _check_tzinfo_arg(tz)
-
-        return cls._fromtimestamp(t, tz is not None, tz)
-
-    @classmethod
     def utcfromtimestamp(cls, t):
-        """Construct a naive UTC datetime from a POSIX timestamp."""
-        return cls._fromtimestamp(t, True, None)
+        """Construct an aware UTC datetime from a POSIX timestamp."""
+        return cls.fromtimestamp(t, timezone.utc)
 
     @classmethod
     def now(cls, tz=None):
@@ -1860,10 +1857,9 @@ class datetime(date):
         return timezone(timedelta(seconds=gmtoff), zone)
 
     def astimezone(self, tz=None):
+        tz = _check_tzinfo_arg(tz)
         if tz is None:
             tz = self._local_timezone()
-        elif not isinstance(tz, tzinfo):
-            raise TypeError("tz argument must be an instance of tzinfo")
 
         mytz = self.tzinfo
         if mytz is None:
@@ -1935,7 +1931,10 @@ class datetime(date):
                            ", ".join(map(str, L)))
         if self._tzinfo is not None:
             assert s[-1:] == ")"
-            s = s[:-1] + ", tzinfo=%r" % self._tzinfo + ")"
+            tz = self._tzinfo
+            if type(tz) is timezone and tz._name is None:
+                tz = _format_offset(tz._offset)
+            s = s[:-1] + ", tzinfo=%r" % tz + ")"
         if self._fold:
             assert s[-1:] == ")"
             s = s[:-1] + ", fold=1)"
@@ -2166,10 +2165,6 @@ class datetime(date):
         return self.__reduce_ex__(2)
 
 
-datetime.min = datetime(1, 1, 1)
-datetime.max = datetime(9999, 12, 31, 23, 59, 59, 999999)
-datetime.resolution = timedelta(microseconds=1)
-
 
 def _isoweek1monday(year):
     # Helper to calculate the day number of the Monday starting week 1
@@ -2184,7 +2179,13 @@ def _isoweek1monday(year):
 
 
 class timezone(tzinfo):
-    __slots__ = '_offset', '_name'
+    __slots__ = '_offset', '_name', '__weakref__'
+
+    import weakref
+    _byofs = weakref.WeakValueDictionary()
+    _bystr = weakref.WeakValueDictionary()
+    del weakref
+    _keepalive = []
 
     # Sentinel value to disallow None
     _Omitted = object()
@@ -2192,8 +2193,9 @@ class timezone(tzinfo):
         if not isinstance(offset, timedelta):
             raise TypeError("offset must be a timedelta")
         if name is cls._Omitted:
-            if not offset:
-                return cls.utc
+            interned = cls._byofs.get(offset)
+            if interned is not None:
+                return interned
             name = None
         elif not isinstance(name, str):
             raise TypeError("name must be a string")
@@ -2208,6 +2210,12 @@ class timezone(tzinfo):
         self = tzinfo.__new__(cls)
         self._offset = offset
         self._name = name
+        if name is None:
+            cls._byofs[offset] = self
+            cls._bystr[_format_offset(offset)] = self
+            cls._keepalive.append(self)
+            if len(cls._keepalive) > 100:
+                cls._keepalive[:] = []
         return self
 
     def __getinitargs__(self):
@@ -2311,6 +2319,24 @@ timezone.utc = timezone._create(timedelta(0))
 timezone.min = timezone._create(-timedelta(hours=23, minutes=59))
 timezone.max = timezone._create(timedelta(hours=23, minutes=59))
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+timedelta.min = timedelta(-999999999)
+timedelta.max = timedelta(days=999999999, hours=23, minutes=59, seconds=59,
+                          microseconds=999999)
+timedelta.resolution = timedelta(microseconds=1)
+
+date.min = date(1, 1, 1)
+date.max = date(9999, 12, 31)
+date.resolution = timedelta(days=1)
+
+time.min = time(0, 0, 0)
+time.max = time(23, 59, 59, 999999)
+time.resolution = timedelta(microseconds=1)
+
+datetime.min = datetime(1, 1, 1)
+datetime.max = datetime(9999, 12, 31, 23, 59, 59, 999999)
+datetime.resolution = timedelta(microseconds=1)
+
 
 # Some time zone algebra.  For a datetime x, let
 #     x.n = x stripped of its timezone -- its naive time.
